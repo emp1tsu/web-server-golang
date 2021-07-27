@@ -1,87 +1,79 @@
 package main
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"html/template"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/google/uuid"
 )
 
 var tpl *template.Template
 
+type user struct {
+	UserName string
+	Password string
+	First    string
+	Last     string
+}
+
+var dbSessions = map[string]string{}
+var dbUsers = map[string]user{}
+
 func init() {
-	tpl = template.Must(template.ParseFiles("index.gohtml"))
+	tpl = template.Must(template.ParseGlob("templates/*"))
 }
 
 func main() {
 	http.HandleFunc("/", index)
+	http.HandleFunc("/vip", vip)
+	http.HandleFunc("/signup", signup)
 	http.Handle("/favicon.ico", http.NotFoundHandler())
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe("localhost:8080", nil)
+
 }
 
 func index(w http.ResponseWriter, req *http.Request) {
-	c := getCookie(w, req)
+	var u user
 
-	if req.Method == http.MethodPost {
-		mf, fh, err := req.FormFile("nf")
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer mf.Close()
-
-		ext := strings.Split(fh.Filename, ".")[1]
-		h := sha256.New()
-		io.Copy(h, mf)
-		fname := fmt.Sprintf("%x", h.Sum(nil)) + "." + ext
-
-		wd, err := os.Getwd()
-		if err != nil {
-			fmt.Println(err)
-		}
-		path := filepath.Join(wd, "pics", fname)
-		nf, err := os.Create(path)
-		if err != nil {
-			fmt.Println(err)
-		}
-		defer nf.Close()
-
-		mf.Seek(0, 0)
-		io.Copy(nf, mf)
-
-		c = appendValue(w, c, fname)
-	}
-
-	xs := strings.Split(c.Value, "|")
-	tpl.Execute(w, xs[1:])
-}
-
-func getCookie(w http.ResponseWriter, req *http.Request) *http.Cookie {
 	c, err := req.Cookie("session")
 	if err != nil {
+		u = user{}
+	}
+
+	if un, ok := dbSessions[c.Value]; ok {
+		u = dbUsers[un]
+	}
+
+	fmt.Printf("%T %v\n", u, u)
+
+	tpl.ExecuteTemplate(w, "index.gohtml", nil)
+}
+
+func vip(w http.ResponseWriter, req *http.Request) {
+	tpl.ExecuteTemplate(w, "vip.gohtml", nil)
+}
+
+func signup(w http.ResponseWriter, req *http.Request) {
+	if req.Method == http.MethodPost {
+		un := req.FormValue("username")
+		p := req.FormValue("password")
+		f := req.FormValue("firstname")
+		l := req.FormValue("lastname")
+
 		sID := uuid.New()
-		c = &http.Cookie{
+		c := &http.Cookie{
 			Name:  "session",
 			Value: sID.String(),
 		}
 		http.SetCookie(w, c)
+		dbSessions[c.Value] = un
+
+		u := user{un, p, f, l}
+		dbUsers[un] = u
+
+		http.Redirect(w, req, "/", http.StatusSeeOther)
+		return
 	}
-
-	return c
-}
-
-func appendValue(w http.ResponseWriter, c *http.Cookie, fname string) *http.Cookie {
-	s := c.Value
-	if !strings.Contains(s, fname) {
-		s += "|" + fname
-	}
-
-	c.Value = s
-	http.SetCookie(w, c)
-	return c
+	tpl.ExecuteTemplate(w, "signup.gohtml", nil)
 }
