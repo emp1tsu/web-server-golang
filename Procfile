@@ -1,1 +1,1 @@
-web: bin/web-server-golang
+web: web-server-golang
